@@ -24,6 +24,28 @@ import {
 } from "@/components/ui/dialog";
 import { Calendar } from "@/components/ui/calendar";
 import { Input } from "@/components/ui/input";
+import {
+  Vote as VoteIcon,
+  Users as UsersIcon,
+  Vote,
+  Trash2,
+} from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type VoteRow = {
   schedule_id: string;
@@ -75,7 +97,22 @@ export default function SchedulePage() {
   const [userProfiles, setUserProfiles] = useState<Record<string, UserProfile>>(
     {},
   );
-  const [showVoters, setShowVoters] = useState<Record<string, boolean>>({}); // schedule_id -> bool
+  const [showVoters, setShowVoters] = useState<Record<string, boolean>>({}); // 기존 상태 사용 안 함
+  // 후보별 투표자 모달
+  const [voterModalOpen, setVoterModalOpen] = useState(false);
+  const [voterModalScheduleId, setVoterModalScheduleId] = useState<
+    string | null
+  >(null);
+  const [confirmClose, setConfirmClose] = useState<{
+    open: boolean;
+    batchId?: string | null;
+    singleId?: string | null;
+  }>({ open: false });
+  const [confirmDelete, setConfirmDelete] = useState<{
+    open: boolean;
+    batchId?: string | null;
+    singleId?: string | null;
+  }>({ open: false });
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
@@ -249,18 +286,108 @@ export default function SchedulePage() {
     }
   }
 
-  const userIsChairman = sessionUserPosition === "협회장"; // 종료 권한
+  const userIsChairman = sessionUserPosition === "협회장"; // 종료/삭제 권한
 
   async function closePoll(batchId: string) {
-    if (!userIsChairman) return; // 권한 체크
-    const { error } = await supabase
+    // 권한 체크
+    if (sessionUserPosition !== "협회장") {
+      alert("협회장만 종료할 수 있습니다.");
+      return;
+    }
+
+    // 1) batch 내 후보 가져오기
+    const { data: schedulesInBatch, error: sErr } = await supabase
+      .from("schedules")
+      .select("id,date")
+      .eq("batch_id", batchId);
+    if (sErr || !schedulesInBatch?.length) {
+      console.error("batch schedules load error:", sErr);
+      return;
+    }
+    const ids = schedulesInBatch.map((r) => r.id);
+
+    // 2) 각 후보의 투표 수 집계
+    const { data: votesData, error: vErr } = await supabase
+      .from("schedule_votes")
+      .select("schedule_id, user_id")
+      .in("schedule_id", ids);
+    if (vErr) {
+      console.error("votes load error:", vErr);
+      return;
+    }
+
+    const counts = new Map<string, number>();
+    ids.forEach((id) => counts.set(id, 0));
+    (votesData || []).forEach((v) => {
+      counts.set(v.schedule_id, (counts.get(v.schedule_id) || 0) + 1);
+    });
+
+    // 3) 최다 득표 일정 선정(동률이면 가장 이른 날짜)
+    const sortedByRule = schedulesInBatch.sort((a, b) => {
+      const diff = (counts.get(b.id) || 0) - (counts.get(a.id) || 0);
+      if (diff !== 0) return diff;
+      return new Date(a.date).getTime() - new Date(b.date).getTime();
+    });
+    const winnerId = sortedByRule[0]?.id;
+    if (!winnerId) {
+      console.warn("no winner found");
+      return;
+    }
+
+    // 4) 종료/확정 플래그 업데이트
+    const { error: closeErr } = await supabase
       .from("schedules")
       .update({ closed: true })
       .eq("batch_id", batchId);
-    if (error) console.error(error);
-    // 부분 상태 업데이트
+    if (closeErr) {
+      console.error("close update error:", closeErr);
+      return;
+    }
+
+    const { error: markWinnerErr } = await supabase
+      .from("schedules")
+      .update({ is_event: true })
+      .eq("id", winnerId);
+    if (markWinnerErr) {
+      console.error("winner mark error:", markWinnerErr);
+      return;
+    }
+
+    const losers = ids.filter((id) => id !== winnerId);
+    if (losers.length) {
+      await supabase
+        .from("schedules")
+        .update({ is_event: false })
+        .in("id", losers);
+    }
+
+    // 5) 자동 출석 처리: winnerId에 투표한 사용자들 출석 upsert(late=false, exempt=false)
+    const winnerVoters = (votesData || []).filter(
+      (v) => v.schedule_id === winnerId,
+    );
+    if (winnerVoters.length) {
+      const payload = winnerVoters.map((v) => ({
+        schedule_id: winnerId,
+        user_id: v.user_id,
+        late: false,
+        exempt: false,
+      }));
+      // upsert: unique(schedule_id,user_id) 기준
+      const { error: attErr } = await supabase
+        .from("attendance")
+        .upsert(payload, {
+          onConflict: "schedule_id,user_id",
+          ignoreDuplicates: false,
+        });
+      if (attErr) console.error("attendance upsert error:", attErr);
+    }
+
+    // 6) 로컬 상태 업데이트(낙관적)
     setSchedulesRaw((prev) =>
-      prev.map((s) => (s.batch_id === batchId ? { ...s, closed: true } : s)),
+      prev.map((s) => {
+        if (s.batch_id !== batchId) return s;
+        return { ...s, closed: true } as any;
+      }),
     );
   }
 
@@ -279,6 +406,66 @@ export default function SchedulePage() {
 
   function toggleShowVoters(scheduleId: string) {
     setShowVoters((prev) => ({ ...prev, [scheduleId]: !prev[scheduleId] }));
+  }
+
+  function openVoterModal(scheduleId: string) {
+    setVoterModalScheduleId(scheduleId);
+    setVoterModalOpen(true);
+  }
+
+  // 종료된 투표 삭제(묶음)
+  async function deletePoll(batchId: string) {
+    if (!userIsChairman) return;
+    // 해당 배치의 schedule id 수집
+    const { data: scheds, error: sErr } = await supabase
+      .from("schedules")
+      .select("id, closed")
+      .eq("batch_id", batchId);
+    if (sErr || !scheds?.length) return;
+
+    // 종료된 투표만 삭제 허용
+    const allClosed = scheds.every((s: any) => !!s.closed);
+    if (!allClosed) {
+      alert("진행 중인 투표는 삭제할 수 없습니다.");
+      return;
+    }
+
+    const ids = scheds.map((s: any) => s.id);
+
+    // 관련 투표/출석 삭제 후 스케줄 삭제
+    if (ids.length) {
+      await supabase.from("schedule_votes").delete().in("schedule_id", ids);
+      await supabase.from("attendance").delete().in("schedule_id", ids);
+      await supabase.from("schedules").delete().in("id", ids);
+    }
+
+    // 로컬 상태 갱신
+    setSchedulesRaw((prev) => prev.filter((s) => s.batch_id !== batchId));
+    setVotes((prev) => prev.filter((v) => !ids.includes(v.schedule_id)));
+  }
+
+  // 종료된 단일 일정 삭제
+  async function deleteSingle(scheduleId: string) {
+    if (!userIsChairman) return;
+    const { data: sched, error } = await supabase
+      .from("schedules")
+      .select("id, closed, batch_id")
+      .eq("id", scheduleId)
+      .maybeSingle();
+    if (error || !sched) return;
+    if (!sched.closed || sched.batch_id) {
+      alert("종료된 단일 일정만 삭제할 수 있습니다.");
+      return;
+    }
+    await supabase
+      .from("schedule_votes")
+      .delete()
+      .eq("schedule_id", scheduleId);
+    await supabase.from("attendance").delete().eq("schedule_id", scheduleId);
+    await supabase.from("schedules").delete().eq("id", scheduleId);
+
+    setSchedulesRaw((prev) => prev.filter((s) => s.id !== scheduleId));
+    setVotes((prev) => prev.filter((v) => v.schedule_id !== scheduleId));
   }
 
   return (
@@ -307,7 +494,7 @@ export default function SchedulePage() {
         {loading && <p className="text-sm text-slate-500">불러오는 중...</p>}
 
         {!loading &&
-          pollCards.map((card, i) => {
+          pollCards.map((card) => {
             const totalVotes = card.schedules.reduce(
               (acc, s) =>
                 acc + votes.filter((v) => v.schedule_id === s.id).length,
@@ -320,23 +507,56 @@ export default function SchedulePage() {
                 className="overflow-hidden"
               >
                 <CardHeader className="space-y-1">
-                  <CardTitle className="text-base">{card.title}</CardTitle>
-                  <CardDescription className="flex items-center justify-between text-xs">
-                    <span>
-                      후보 {card.schedules.length}개 · 총 투표 {totalVotes}회
-                    </span>
-                    <span
-                      className={cn(
-                        "rounded px-2 py-[2px] text-[10px] font-medium",
-                        card.isClosed
-                          ? "bg-slate-200 text-slate-700"
-                          : "bg-green-100 text-green-700",
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">{card.title}</CardTitle>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-[2px] text-[11px] font-medium",
+                          card.isClosed
+                            ? "bg-slate-200 text-slate-700"
+                            : "bg-green-100 text-green-700",
+                        )}
+                      >
+                        <VoteIcon className="h-3 w-3" />
+                        {card.isClosed ? "종료됨" : "진행중"}
+                      </span>
+
+                      {/* 종료된 경우에만 삭제 버튼 표시(협회장만) */}
+                      {card.isClosed && userIsChairman && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <button
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-md border bg-white hover:bg-rose-50"
+                                aria-label="투표 삭제"
+                                onClick={() =>
+                                  setConfirmDelete({
+                                    open: true,
+                                    batchId: card.isPoll ? card.batch_id : null,
+                                    singleId: card.isPoll
+                                      ? null
+                                      : card.schedules[0].id,
+                                  })
+                                }
+                              >
+                                <Trash2 className="h-4 w-4 text-rose-600" />
+                              </button>
+                            </TooltipTrigger>
+                            <TooltipContent side="top" className="text-[11px]">
+                              종료된 투표 삭제
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       )}
-                    >
-                      {card.isClosed ? "종료됨" : "진행중"}
-                    </span>
+                    </div>
+                  </div>
+                  <CardDescription className="text-xs">
+                    후보 {card.schedules.length}개 · 총 {totalVotes}표
                   </CardDescription>
                 </CardHeader>
+
+                {/* ...existing CardContent... */}
                 <CardContent className="space-y-4">
                   <div className="flex flex-wrap gap-2">
                     {card.schedules.map((opt) => {
@@ -346,77 +566,66 @@ export default function SchedulePage() {
                       const myVoted = voters.some(
                         (v) => v.user_id === sessionUserId,
                       );
+
                       return (
                         <div
                           key={opt.id}
                           className="flex flex-col items-center"
                         >
-                          <button
-                            disabled={card.isClosed}
-                            onClick={() => toggleVote(opt.id)}
+                          <div
                             className={cn(
-                              "group relative flex w-[118px] flex-col items-center justify-center rounded-md border px-3 py-2 text-xs transition",
+                              "group relative flex w-[140px] flex-col items-center justify-center rounded-md border px-3 py-2 text-xs transition",
                               myVoted
                                 ? "border-sky-500 bg-sky-50 text-sky-700"
-                                : "border-slate-200 bg-white hover:bg-slate-50",
-                              card.isClosed && "cursor-not-allowed opacity-60",
+                                : "border-slate-200 bg-white",
+                              card.isClosed && "opacity-60",
                             )}
-                            aria-label={opt.dateStr}
                           >
-                            <span className="font-medium">
-                              {format(opt.dateObj, "MM/dd", { locale: ko })}
-                            </span>
-                            <span className="text-[10px] text-slate-500">
-                              {format(opt.dateObj, "(EEE)", { locale: ko })}
-                            </span>
-                            <span
-                              className={cn(
-                                "mt-1 rounded-full px-2 py-[1px] text-[10px] font-semibold",
-                                myVoted
-                                  ? "bg-sky-500 text-white"
-                                  : "bg-slate-100 text-slate-600",
-                              )}
-                            >
-                              {voters.length}명
-                            </span>
-                          </button>
-                          {voters.length > 0 && (
                             <button
-                              onClick={() => toggleShowVoters(opt.id)}
-                              className="mt-1 text-[10px] text-slate-500 hover:underline"
+                              disabled={card.isClosed}
+                              onClick={() => toggleVote(opt.id)}
+                              className="flex w-full flex-col items-center"
+                              aria-label={opt.dateStr}
                             >
-                              {showVoters[opt.id]
-                                ? "투표자 숨기기"
-                                : "투표자 보기"}
+                              <span className="font-medium">
+                                {format(opt.dateObj, "MM/dd", { locale: ko })}
+                              </span>
+                              <span className="text-[10px] text-slate-500">
+                                {format(opt.dateObj, "(EEE)", { locale: ko })}
+                              </span>
+                              <span
+                                className={cn(
+                                  "mt-1 rounded-full px-2 py-[1px] text-[10px] font-semibold",
+                                  myVoted
+                                    ? "bg-sky-500 text-white"
+                                    : "bg-slate-100 text-slate-600",
+                                )}
+                              >
+                                {voters.length}명
+                              </span>
                             </button>
-                          )}
-                          {showVoters[opt.id] && (
-                            <div className="mt-1 w-[118px] rounded border bg-white p-1">
-                              <ul className="space-y-[2px]">
-                                {voters.map((v) => {
-                                  const profile = userProfiles[v.user_id];
-                                  const label =
-                                    profile?.name ||
-                                    profile?.nickname ||
-                                    profile?.email ||
-                                    v.user_id.slice(0, 6);
-                                  return (
-                                    <li
-                                      key={v.user_id}
-                                      className="truncate text-[10px] text-slate-600"
-                                    >
-                                      • {label}
-                                      {profile?.position && (
-                                        <span className="ml-1 text-[9px] text-amber-600">
-                                          ({profile.position})
-                                        </span>
-                                      )}
-                                    </li>
-                                  );
-                                })}
-                              </ul>
-                            </div>
-                          )}
+
+                            {/* 아이콘 버튼: 투표자 보기 */}
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    onClick={() => openVoterModal(opt.id)}
+                                    className="mt-1 inline-flex h-7 w-7 items-center justify-center rounded-md border bg-white hover:bg-slate-50"
+                                    aria-label="투표자 보기"
+                                  >
+                                    <Vote className="h-4 w-4 text-slate-700" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent
+                                  side="top"
+                                  className="text-[11px]"
+                                >
+                                  투표한 사람
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          </div>
                         </div>
                       );
                     })}
@@ -432,9 +641,11 @@ export default function SchedulePage() {
                             alert("협회장만 종료할 수 있습니다.");
                             return;
                           }
-                          card.isPoll
-                            ? card.batch_id && closePoll(card.batch_id)
-                            : closeSingle(card.schedules[0].id);
+                          setConfirmClose({
+                            open: true,
+                            batchId: card.isPoll ? card.batch_id : null,
+                            singleId: card.isPoll ? null : card.schedules[0].id,
+                          });
                         }}
                         className="text-xs"
                       >
@@ -472,7 +683,7 @@ export default function SchedulePage() {
                 투표 제목
               </label>
               <Input
-                placeholder="예: 3월 정기 모임 날짜"
+                placeholder="0월 0주차 모임"
                 value={pollTitle}
                 onChange={(e) => setPollTitle(e.target.value)}
               />
@@ -543,6 +754,127 @@ export default function SchedulePage() {
               onClick={createPoll}
             >
               {savingPoll ? "저장 중..." : "저장"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 투표 종료 확인 AlertDialog */}
+      <AlertDialog
+        open={confirmClose.open}
+        onOpenChange={(open: any) =>
+          setConfirmClose((prev) => ({ ...prev, open }))
+        }
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>투표를 종료할까요?</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              종료하면 최다 득표 날짜를 확정하고, 해당 날짜에 투표한 사람들은
+              자동으로 출석 처리됩니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="text-xs">취소</AlertDialogCancel>
+            <AlertDialogAction
+              className="text-xs"
+              onClick={() => {
+                if (confirmClose.batchId) closePoll(confirmClose.batchId);
+                if (confirmClose.singleId) closeSingle(confirmClose.singleId);
+                setConfirmClose({ open: false, batchId: null, singleId: null });
+              }}
+            >
+              종료하기
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 삭제 확인 AlertDialog */}
+      <AlertDialog
+        open={confirmDelete.open}
+        onOpenChange={(open: any) =>
+          setConfirmDelete((prev) => ({ ...prev, open }))
+        }
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>종료된 투표를 삭제할까요?</AlertDialogTitle>
+            <AlertDialogDescription className="text-xs">
+              삭제하면 해당 투표의 후보, 투표 내역, 출석 기록이 함께 삭제됩니다.
+              이 작업은 되돌릴 수 없습니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="text-xs">취소</AlertDialogCancel>
+            <AlertDialogAction
+              className="text-xs"
+              onClick={async () => {
+                if (confirmDelete.batchId)
+                  await deletePoll(confirmDelete.batchId);
+                if (confirmDelete.singleId)
+                  await deleteSingle(confirmDelete.singleId);
+                setConfirmDelete({
+                  open: false,
+                  batchId: null,
+                  singleId: null,
+                });
+              }}
+            >
+              삭제하기
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* 후보별 투표자 모달 (기존 유지) */}
+      <Dialog open={voterModalOpen} onOpenChange={setVoterModalOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>이 날짜에 투표한 사람</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[40vh] overflow-y-auto">
+            {(() => {
+              const voters = votes.filter(
+                (v) => v.schedule_id === voterModalScheduleId,
+              );
+              if (!voters.length) {
+                return (
+                  <p className="text-xs text-slate-500">
+                    아직 투표한 사람이 없습니다.
+                  </p>
+                );
+              }
+              return (
+                <ul className="space-y-1">
+                  {voters.map((v) => {
+                    const profile = userProfiles[v.user_id];
+                    const label =
+                      profile?.name ||
+                      profile?.nickname ||
+                      profile?.email ||
+                      v.user_id.slice(0, 6);
+                    return (
+                      <li
+                        key={v.user_id}
+                        className="flex items-center justify-between text-[12px] text-slate-700"
+                      >
+                        <span>• {label}</span>
+                        {profile?.position && (
+                          <span className="text-[11px] text-amber-700">
+                            ({profile.position})
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              );
+            })()}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setVoterModalOpen(false)}>
+              닫기
             </Button>
           </DialogFooter>
         </DialogContent>
