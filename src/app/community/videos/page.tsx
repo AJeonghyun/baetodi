@@ -206,7 +206,7 @@ export default function CommunityVideosPage() {
         {/* 예: 상단 입력 옆에 보강 버튼(관리용) */}
         {/* <Button variant="outline" onClick={backfillTitles}>제목 보강</Button> */}
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {videos.length === 0 ? (
             <p className="text-sm text-slate-600">
               아직 추가된 영상이 없습니다.
@@ -220,8 +220,8 @@ export default function CommunityVideosPage() {
                   rel="noreferrer"
                   className="block w-full overflow-hidden rounded-t-lg"
                 >
-                  {/* 4:3 비율 컨테이너 + contain */}
-                  <div className="aspect-[4/3] w-full bg-black">
+                  {/* 더 작은 썸네일(16:9) */}
+                  <div className="aspect-video w-full bg-black">
                     <img
                       src={ytThumb(v.video_id)}
                       alt="YouTube thumbnail"

@@ -37,6 +37,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 
 type UserRow = {
   id: string;
@@ -82,9 +89,22 @@ export default function CommunityPage() {
   // 팀 구성: 모드 제거 → 기본 2명까지(원하면 제한 변경 가능)
   const teamLimit = 2;
 
+  // 최근 경기 + 점수 미리보기 데이터
+  const [recentMatches, setRecentMatches] = useState<
+    {
+      id: string;
+      date: string;
+      team_a_name: string;
+      team_b_name: string;
+      scoreA?: number | null;
+      scoreB?: number | null;
+    }[]
+  >([]);
+
   useEffect(() => {
     fetchUsers();
     fetchVideos();
+    fetchRecentMatches();
   }, []);
 
   useEffect(() => {
@@ -107,6 +127,49 @@ export default function CommunityPage() {
       .select("id,url,video_id,title,created_by,created_at")
       .order("created_at", { ascending: false });
     setVideos((data || []) as VideoRow[]);
+  }
+
+  async function fetchRecentMatches() {
+    const { data: m } = await supabase
+      .from("matches_official")
+      .select("id,date,team_a_name,team_b_name")
+      .order("date", { ascending: false })
+      .limit(4);
+
+    const base = (m || []) as {
+      id: string;
+      date: string;
+      team_a_name: string;
+      team_b_name: string;
+    }[];
+    if (base.length === 0) {
+      setRecentMatches([]);
+      return;
+    }
+
+    const ids = base.map((x) => x.id);
+    const { data: parts } = await supabase
+      .from("match_participants")
+      .select("match_id,team,score_for")
+      .in("match_id", ids);
+
+    const byMatch: Record<string, { A?: number; B?: number }> = {};
+    (parts || []).forEach((p) => {
+      const mId = p.match_id as string;
+      byMatch[mId] ??= {};
+      if (p.team === "A" && byMatch[mId].A == null)
+        byMatch[mId].A = p.score_for as number;
+      if (p.team === "B" && byMatch[mId].B == null)
+        byMatch[mId].B = p.score_for as number;
+    });
+
+    setRecentMatches(
+      base.map((r) => ({
+        ...r,
+        scoreA: byMatch[r.id]?.A ?? null,
+        scoreB: byMatch[r.id]?.B ?? null,
+      })),
+    );
   }
 
   function toggleMember(userId: string, team: Team) {
@@ -266,41 +329,80 @@ export default function CommunityPage() {
         <Separator className="my-6" />
 
         <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
-              <div>
+          {/* 경기 기록 카드: 전체 클릭 이동 + 미리보기 (크기 통일: h-full) */}
+          <Link
+            href="/community/matches"
+            className="block h-full rounded-lg border hover:bg-slate-50"
+          >
+            <Card className="pointer-events-none h-full">
+              <CardHeader className="space-y-1">
                 <CardTitle>경기 기록</CardTitle>
                 <CardDescription>모두가 기록하고 저장</CardDescription>
-              </div>
-              <Button size="sm" onClick={() => setOpenCreate(true)}>
-                경기 기록 추가
-              </Button>
-            </CardHeader>
-            <CardContent className="text-sm text-slate-600">
-              복식/단식 선택 후 참가자를 지정하고 점수/결과를 저장하세요.
-            </CardContent>
-          </Card>
+              </CardHeader>
+              <CardContent className="pointer-events-auto">
+                {recentMatches.length === 0 ? (
+                  <p className="text-sm text-slate-600">
+                    아직 저장된 경기가 없습니다.
+                  </p>
+                ) : (
+                  <div className="grid gap-3">
+                    {recentMatches.map((m) => (
+                      <div key={m.id} className="rounded-md border p-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-slate-600">{m.date}</p>
+                          <span className="text-[11px] text-slate-500">
+                            상세 보기
+                          </span>
+                        </div>
+                        <div className="mt-1 flex items-center justify-between">
+                          <p className="text-sm font-semibold">
+                            {m.team_a_name} vs {m.team_b_name}
+                          </p>
+                          <p className="font-mono text-xs text-slate-700">
+                            {m.scoreA != null && m.scoreB != null
+                              ? `${m.scoreA} : ${m.scoreB}`
+                              : "- : -"}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </Link>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>사진 공유</CardTitle>
-              <CardDescription>최근 활동</CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm text-slate-600">
-              활동 사진을 업로드하세요.
-            </CardContent>
-          </Card>
+          {/* 사진 공유(변경 없음) */}
+          <Link
+            href="/community/photos"
+            className="block h-full rounded-lg border hover:bg-slate-50"
+          >
+            <Card className="pointer-events-none h-full">
+              <CardHeader>
+                <CardTitle>사진 공유</CardTitle>
+                <CardDescription>최근 활동</CardDescription>
+              </CardHeader>
+              <CardContent className="pointer-events-auto text-sm text-slate-600">
+                활동 사진을 업로드하세요.
+              </CardContent>
+            </Card>
+          </Link>
 
-          {/* 유튜브 영상 공유 카드 */}
-          <Card>
-            <CardHeader className="flex-row items-center justify-between space-y-0">
-              <div>
-                <CardTitle>배드민턴 영상 아카이브</CardTitle>
-                <CardDescription>유튜브 링크로 정보 공유</CardDescription>
+          {/* 배드민턴 영상 아카이브 카드: Carousel 미리보기 */}
+          <Card className="h-full">
+            <CardHeader className="space-y-1">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>배드민턴 영상 아카이브</CardTitle>
+                  <CardDescription>유튜브 링크로 정보 공유</CardDescription>
+                </div>
+                <Link
+                  href="/community/videos"
+                  className="text-sm text-slate-600 hover:underline"
+                >
+                  전체 보기
+                </Link>
               </div>
-              <Link href="/community/videos" className="text-sm underline">
-                전체 보기
-              </Link>
             </CardHeader>
             <CardContent>
               {videos.length === 0 ? (
@@ -308,39 +410,50 @@ export default function CommunityPage() {
                   아직 공유된 영상이 없습니다.
                 </p>
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {videos.slice(0, 4).map((v) => (
-                    <Link
-                      key={v.id}
-                      href="/community/videos"
-                      className="rounded-lg border hover:bg-slate-50"
-                    >
-                      <div className="block w-full overflow-hidden rounded-t-lg">
-                        <img
-                          src={ytThumb(v.video_id)}
-                          alt="YouTube thumbnail"
-                          className="h-40 w-full object-cover"
-                          loading="lazy"
-                        />
-                      </div>
-                      <div className="p-3">
-                        <p className="line-clamp-2 text-sm font-medium text-slate-800">
-                          {v.title || "배드민턴 정보 영상"}
-                        </p>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {new URL(v.url).hostname}
-                        </p>
-                      </div>
-                    </Link>
-                  ))}
+                <div className="relative">
+                  <Carousel className="w-full">
+                    <CarouselContent>
+                      {videos.slice(0, 10).map((v) => (
+                        <CarouselItem
+                          key={v.id}
+                          className="basis-1/2 lg:basis-1/4"
+                        >
+                          <Link
+                            href="/community/videos"
+                            className="block rounded-lg border hover:bg-slate-50"
+                          >
+                            <div className="w-full overflow-hidden rounded-t-lg">
+                              <div className="aspect-video w-full bg-black">
+                                <img
+                                  src={ytThumb(v.video_id)}
+                                  alt="YouTube thumbnail"
+                                  className="h-full w-full object-contain"
+                                  loading="lazy"
+                                />
+                              </div>
+                            </div>
+                            <div className="p-2">
+                              <p className="line-clamp-2 text-xs font-medium text-slate-800">
+                                {v.title || "배드민턴 정보 영상"}
+                              </p>
+                            </div>
+                          </Link>
+                        </CarouselItem>
+                      ))}
+                    </CarouselContent>
+                    {/* 화살표 제거 */}
+                    {/* <CarouselPrevious className="hidden" />
+                    <CarouselNext className="hidden" /> */}
+                  </Carousel>
                 </div>
               )}
+              {/* 하단 전체 보기 링크 제거 */}
             </CardContent>
           </Card>
         </div>
       </main>
 
-      {/* 경기 기록 추가 다이얼로그(간소화) */}
+      {/* 경기 기록 추가 다이얼로그는 커뮤니티 카드에서는 사용하지 않으므로 제거하거나 유지해도 됩니다 */}
       <Dialog open={openCreate} onOpenChange={setOpenCreate}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
