@@ -495,12 +495,6 @@ export default function SchedulePage() {
 
         {!loading &&
           pollCards.map((card) => {
-            const totalVotes = card.schedules.reduce(
-              (acc, s) =>
-                acc + votes.filter((v) => v.schedule_id === s.id).length,
-              0,
-            );
-
             return (
               <Card
                 key={card.batch_id || card.schedules[0].id}
@@ -552,7 +546,7 @@ export default function SchedulePage() {
                     </div>
                   </div>
                   <CardDescription className="text-xs">
-                    후보 {card.schedules.length}개 · 총 {totalVotes}표
+                    후보 {card.schedules.length}개
                   </CardDescription>
                 </CardHeader>
 
@@ -827,7 +821,7 @@ export default function SchedulePage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* 후보별 투표자 모달 (기존 유지) */}
+      {/* 후보별 투표자 모달 (수정) */}
       <Dialog open={voterModalOpen} onOpenChange={setVoterModalOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
@@ -849,22 +843,19 @@ export default function SchedulePage() {
                 <ul className="space-y-1">
                   {voters.map((v) => {
                     const profile = userProfiles[v.user_id];
-                    const label =
-                      profile?.name ||
-                      profile?.nickname ||
-                      profile?.email ||
-                      v.user_id.slice(0, 6);
+                    const name = profile?.name;
+                    const positionLabel = profile?.position?.trim()
+                      ? profile.position
+                      : "미지정";
                     return (
                       <li
                         key={v.user_id}
-                        className="flex items-center justify-between text-[12px] text-slate-700"
+                        className="flex items-center justify-between text-[12px] text-black"
                       >
-                        <span>• {label}</span>
-                        {profile?.position && (
-                          <span className="text-[11px] text-amber-700">
-                            ({profile.position})
-                          </span>
-                        )}
+                        <span>• {name}</span>
+                        <span className="text-[11px] text-amber-600">
+                          ({positionLabel})
+                        </span>
                       </li>
                     );
                   })}

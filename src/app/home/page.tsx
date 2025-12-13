@@ -206,6 +206,9 @@ export default function HomePage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuLabel>계정</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => router.push("/mypage")}>
+                  마이페이지
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => {
                     setNicknameInput(profile?.nickname ?? "");
@@ -213,9 +216,6 @@ export default function HomePage() {
                   }}
                 >
                   프로필 설정
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => router.push("/mypage")}>
-                  마이페이지
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
@@ -233,7 +233,7 @@ export default function HomePage() {
       <section className="w-full px-4 py-16 sm:px-6 lg:px-10">
         <div className="space-y-4 text-left">
           <h2 className="text-5xl leading-tight font-extrabold tracking-tight">
-            배토디 — 함께 만드는 배드민턴 커뮤니티
+            배토디 — 배드민턴 토할때까지 디질때까지
           </h2>
           <p className="max-w-2xl text-lg leading-relaxed text-slate-600 sm:text-xl">
             일정 관리, 참여 투표, 공지 확인을 한 곳에서.

@@ -35,11 +35,33 @@ export default function AuthCallback() {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
 
+    async function redirectByPosition() {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData.session?.user?.id;
+      if (!uid) {
+        router.replace("/home");
+        return;
+      }
+      // 사용자 행 보장 후 포지션 확인
+      await ensureUserRow();
+      const { data: profile } = await supabase
+        .from("users")
+        .select("position")
+        .eq("id", uid)
+        .maybeSingle();
+
+      const pos = profile?.position ?? null;
+      if (!pos || pos === "미지정") {
+        router.replace("/onboarding");
+      } else {
+        router.replace("/home");
+      }
+    }
+
     if (!code) {
-      // If no code is present, try to read an existing session or redirect.
       supabase.auth.getSession().then(({ data }) => {
         if (data.session) {
-          ensureUserRow().finally(() => router.replace("/home"));
+          redirectByPosition();
         } else {
           router.replace("/home");
         }
@@ -50,7 +72,8 @@ export default function AuthCallback() {
     supabase.auth
       .exchangeCodeForSession(code)
       .then(ensureUserRow)
-      .finally(() => router.replace("/home"));
+      .then(redirectByPosition)
+      .catch(() => router.replace("/onboarding"));
   }, [router]);
 
   return (
