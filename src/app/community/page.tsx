@@ -47,6 +47,15 @@ type UserRow = {
 
 type Team = "A" | "B";
 
+type VideoRow = {
+  id: string;
+  url: string;
+  video_id: string;
+  title: string | null;
+  created_by: string | null;
+  created_at: string;
+};
+
 export default function CommunityPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [openCreate, setOpenCreate] = useState(false);
@@ -64,12 +73,18 @@ export default function CommunityPage() {
   const [dateContentWidth, setDateContentWidth] = useState<number | undefined>(
     undefined,
   );
+  const [videos, setVideos] = useState<VideoRow[]>([]);
+  const [openVideoAdd, setOpenVideoAdd] = useState(false);
+  const [newVideoUrl, setNewVideoUrl] = useState("");
+  const [savingVideo, setSavingVideo] = useState(false);
+  const [previewOpenId, setPreviewOpenId] = useState<string | null>(null);
 
   // 팀 구성: 모드 제거 → 기본 2명까지(원하면 제한 변경 가능)
   const teamLimit = 2;
 
   useEffect(() => {
     fetchUsers();
+    fetchVideos();
   }, []);
 
   useEffect(() => {
@@ -84,6 +99,14 @@ export default function CommunityPage() {
       .select("id,name,nickname,email")
       .order("name", { ascending: true });
     setUsers((data || []) as UserRow[]);
+  }
+
+  async function fetchVideos() {
+    const { data } = await supabase
+      .from("community_videos")
+      .select("id,url,video_id,title,created_by,created_at")
+      .order("created_at", { ascending: false });
+    setVideos((data || []) as VideoRow[]);
   }
 
   function toggleMember(userId: string, team: Team) {
@@ -176,6 +199,55 @@ export default function CommunityPage() {
     setScoreB("");
   }
 
+  function parseYouTubeId(url: string): string | null {
+    try {
+      const u = new URL(url);
+      // youtu.be/<id>
+      if (u.hostname.includes("youtu.be")) {
+        return u.pathname.split("/")[1] || null;
+      }
+      // youtube.com/watch?v=<id>
+      if (u.hostname.includes("youtube.com")) {
+        const v = u.searchParams.get("v");
+        if (v) return v;
+        // /embed/<id> or /shorts/<id>
+        const parts = u.pathname.split("/");
+        const i = parts.findIndex((p) => p === "embed" || p === "shorts");
+        if (i >= 0 && parts[i + 1]) return parts[i + 1];
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function addVideo() {
+    const id = parseYouTubeId(newVideoUrl.trim());
+    if (!id) return;
+    setSavingVideo(true);
+    const { data: userData } = await supabase.auth.getUser();
+    const createdBy = userData?.user?.id || null;
+
+    // 제목은 우선 null로 저장하고 클라이언트에서 카드에선 디폴트 처리
+    const payload = {
+      url: newVideoUrl.trim(),
+      video_id: id,
+      title: null,
+      created_by: createdBy,
+    };
+    const { error } = await supabase.from("community_videos").insert(payload);
+    setSavingVideo(false);
+    if (!error) {
+      setOpenVideoAdd(false);
+      setNewVideoUrl("");
+      fetchVideos();
+    }
+  }
+
+  function ytThumb(id: string) {
+    return `https://img.youtube.com/vi/${id}/hqdefault.jpg`;
+  }
+
   return (
     <div className="min-h-screen w-full bg-white text-slate-800">
       <header className="sticky top-0 w-full border-b border-slate-200 bg-white/80 backdrop-blur">
@@ -211,21 +283,58 @@ export default function CommunityPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>출석 현황</CardTitle>
-              <CardDescription>이번 달</CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm text-slate-600">
-              출석 집계가 표시됩니다.
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle>사진 공유</CardTitle>
               <CardDescription>최근 활동</CardDescription>
             </CardHeader>
             <CardContent className="text-sm text-slate-600">
               활동 사진을 업로드하세요.
+            </CardContent>
+          </Card>
+
+          {/* 유튜브 영상 공유 카드 */}
+          <Card>
+            <CardHeader className="flex-row items-center justify-between space-y-0">
+              <div>
+                <CardTitle>배드민턴 영상 아카이브</CardTitle>
+                <CardDescription>유튜브 링크로 정보 공유</CardDescription>
+              </div>
+              <Link href="/community/videos" className="text-sm underline">
+                전체 보기
+              </Link>
+            </CardHeader>
+            <CardContent>
+              {videos.length === 0 ? (
+                <p className="text-sm text-slate-600">
+                  아직 공유된 영상이 없습니다.
+                </p>
+              ) : (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {videos.slice(0, 4).map((v) => (
+                    <Link
+                      key={v.id}
+                      href="/community/videos"
+                      className="rounded-lg border hover:bg-slate-50"
+                    >
+                      <div className="block w-full overflow-hidden rounded-t-lg">
+                        <img
+                          src={ytThumb(v.video_id)}
+                          alt="YouTube thumbnail"
+                          className="h-40 w-full object-cover"
+                          loading="lazy"
+                        />
+                      </div>
+                      <div className="p-3">
+                        <p className="line-clamp-2 text-sm font-medium text-slate-800">
+                          {v.title || "배드민턴 정보 영상"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {new URL(v.url).hostname}
+                        </p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -419,6 +528,41 @@ export default function CommunityPage() {
               onClick={createMatch}
             >
               {saving ? "저장 중..." : "저장"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 영상 추가 다이얼로그 */}
+      <Dialog open={openVideoAdd} onOpenChange={setOpenVideoAdd}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>유튜브 영상 추가</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid gap-1">
+              <label className="text-xs text-slate-600">유튜브 링크</label>
+              <Input
+                placeholder="예: https://www.youtube.com/watch?v=XXXXXXXX"
+                value={newVideoUrl}
+                onChange={(e) => setNewVideoUrl(e.target.value)}
+              />
+              {!newVideoUrl || parseYouTubeId(newVideoUrl) ? null : (
+                <p className="text-[12px] text-rose-600">
+                  유효한 유튜브 링크가 아닙니다.
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpenVideoAdd(false)}>
+              취소
+            </Button>
+            <Button
+              disabled={!parseYouTubeId(newVideoUrl) || savingVideo}
+              onClick={addVideo}
+            >
+              {savingVideo ? "저장 중..." : "추가"}
             </Button>
           </DialogFooter>
         </DialogContent>
