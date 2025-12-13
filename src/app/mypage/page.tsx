@@ -49,140 +49,133 @@ export default function CommunityPage() {
     fetchMyMatches();
   }, []);
 
-  // 출석: attendance ←→ schedules 조인으로 월간 데이터 한 번에 조회
   async function fetchMonthAttendance() {
     setLoading(true);
     const s = startOfMonth(new Date());
     const e = endOfMonth(new Date());
-
-    // FK: attendance.schedule_id → schedules.id 가 있다고 가정
-    // schedules(date, is_event) 포함해서 범위/이벤트 필터링
-    const { data, error } = await supabase
-      .from("attendance")
-      .select(
-        `
-        schedule_id,
-        user_id,
-        late,
-        exempt,
-        schedules:schedule_id (
-          id,
-          date,
-          is_event
-        )
-      `,
-      )
-      .gte("schedules.date", format(s, "yyyy-MM-dd"))
-      .lte("schedules.date", format(e, "yyyy-MM-dd"));
-
-    if (error) {
-      setAttendanceRows([]);
-      setEvents([]);
+    const { data: eventData, error: evErr } = await supabase
+      .from("schedules")
+      .select("id,date")
+      .gte("date", format(s, "yyyy-MM-dd"))
+      .lte("date", format(e, "yyyy-MM-dd"))
+      .eq("is_event", true)
+      .order("date", { ascending: true });
+    if (evErr) {
       setLoading(false);
       return;
     }
+    const evs = (eventData || []) as EventRow[];
+    setEvents(evs);
 
-    const rows = (data || []) as unknown as (AttendanceRow & {
-      schedules: { id: string; date: string; is_event: boolean } | null;
-    })[];
-
-    // 이벤트 스케줄만 추출
-    const evMap = new Map<string, EventRow>();
-    for (const r of rows) {
-      if (r.schedules && r.schedules.is_event) {
-        evMap.set(r.schedules.id, {
-          id: r.schedules.id,
-          date: r.schedules.date,
-        });
-      }
+    const eventIds = evs.map((r) => r.id);
+    if (eventIds.length) {
+      const { data: attData } = await supabase
+        .from("attendance")
+        .select("schedule_id,user_id,late,exempt")
+        .in("schedule_id", eventIds);
+      setAttendanceRows((attData || []) as AttendanceRow[]);
+    } else {
+      setAttendanceRows([]);
     }
-    setEvents(
-      Array.from(evMap.values()).sort((a, b) => (a.date < b.date ? -1 : 1)),
-    );
-
-    // attendanceRows는 그대로 유지(면제 제외 로직은 렌더링에서 처리)
-    setAttendanceRows(
-      rows
-        .filter((r) => r.schedules?.is_event)
-        .map((r) => ({
-          schedule_id: r.schedule_id,
-          user_id: r.user_id,
-          late: r.late,
-          exempt: r.exempt,
-        })),
-    );
-
     setLoading(false);
   }
 
-  // 경기: 내 참가 행 + 경기 기본정보를 조인해 한 번에 조회
   async function fetchMyMatches() {
     const { data: userData } = await supabase.auth.getUser();
     const uid = userData?.user?.id;
     if (!uid) return;
 
-    const { data, error } = await supabase
+    // 내가 참가한 최신 20경기 참가 행
+    const { data: myParts } = await supabase
       .from("match_participants")
-      .select(
-        `
-        match_id,
-        user_id,
-        team,
-        score_for,
-        score_against,
-        match:match_id (
-          id,
-          date,
-          team_a_name,
-          team_b_name
-        )
-      `,
-      )
+      .select("match_id,user_id,team,score_for,score_against")
       .eq("user_id", uid)
       .order("match_id", { ascending: false })
       .limit(20);
 
-    if (error || !data) {
+    const parts = (myParts || []) as {
+      match_id: string;
+      user_id: string;
+      team: "A" | "B";
+      score_for: number | null;
+      score_against: number | null;
+    }[];
+
+    if (!parts.length) {
       setMatches([]);
       return;
     }
 
-    const built: MatchRow[] = (data as any[])
+    // 해당 경기 기본 정보
+    const matchIds = Array.from(new Set(parts.map((p) => p.match_id)));
+    const { data: mRows } = await supabase
+      .from("matches_official")
+      .select("id,date,team_a_name,team_b_name")
+      .in("id", matchIds);
+
+    const matchesMap = new Map<
+      string,
+      { id: string; date: string; team_a_name: string; team_b_name: string }
+    >();
+    (mRows || []).forEach((m) => {
+      matchesMap.set(m.id, m as any);
+    });
+
+    // 각 경기의 양 팀 점수도 계산(참가자 테이블에서 집계)
+    const { data: allPartsForMatches } = await supabase
+      .from("match_participants")
+      .select("match_id,team,score_for")
+      .in("match_id", matchIds);
+
+    const scoreByMatch: Record<
+      string,
+      { A?: number | null; B?: number | null }
+    > = {};
+    (allPartsForMatches || []).forEach((r) => {
+      const mid = r.match_id as string;
+      scoreByMatch[mid] ??= {};
+      if (r.team === "A" && scoreByMatch[mid].A == null)
+        scoreByMatch[mid].A = r.score_for ?? null;
+      if (r.team === "B" && scoreByMatch[mid].B == null)
+        scoreByMatch[mid].B = r.score_for ?? null;
+    });
+
+    // 내 참가 행을 기반으로 카드용 MatchRow 구성
+    const built: MatchRow[] = parts
       .map((p) => {
-        const m = p.match as {
-          id: string;
-          date: string;
-          team_a_name: string;
-          team_b_name: string;
-        } | null;
-        if (!m) return null;
+        const base = matchesMap.get(p.match_id);
+        if (!base) return null;
 
-        const myTeam: "A" | "B" = p.team;
-        const myOpponent = myTeam === "A" ? m.team_b_name : m.team_a_name;
+        const sA = scoreByMatch[p.match_id]?.A ?? null;
+        const sB = scoreByMatch[p.match_id]?.B ?? null;
 
-        // 승/패 계산: 내 참가 행의 score_for/score_against만으로 가능
-        const sFor: number | null = p.score_for ?? null;
-        const sAgainst: number | null = p.score_against ?? null;
+        // 상대 팀명(opponent) 계산
+        const myOpponent = p.team === "A" ? base.team_b_name : base.team_a_name;
 
+        // 승/패 계산
         let result: "win" | "loss" = "loss";
-        if (sFor != null && sAgainst != null) {
-          result = sFor > sAgainst ? "win" : "loss";
+        if (sA != null && sB != null) {
+          const myScore = p.team === "A" ? sA : sB;
+          const oppScore = p.team === "A" ? sB : sA;
+          result = myScore > oppScore ? "win" : "loss";
         }
 
         return {
-          id: m.id,
-          date: m.date,
+          id: p.match_id,
+          date: base.date,
           opponent: myOpponent,
           result,
           my_user_id: uid,
-          score_for: sFor,
-          score_against: sAgainst,
+          score_for: p.score_for ?? null,
+          score_against: p.score_against ?? null,
         } as MatchRow;
       })
       .filter(Boolean) as MatchRow[];
 
+    // 최신 날짜 기준 정렬
     built.sort((a, b) => (a.date < b.date ? 1 : -1));
-    setMatches(built);
+
+    setMatches(built.slice(0, 20));
   }
 
   // 월간 요약(출석/지각 수)
@@ -303,7 +296,7 @@ export default function CommunityPage() {
               <CardTitle>출석 현황</CardTitle>
               <CardDescription>이번 달 기준</CardDescription>
             </CardHeader>
-            <CardContent className="text-sm text-slate-700">
+            <CardContent className="text-sm text-black">
               {loading ? (
                 "불러오는 중..."
               ) : (
@@ -355,7 +348,7 @@ export default function CommunityPage() {
                       {["일", "월", "화", "수", "목", "금", "토"].map((d) => (
                         <div
                           key={d}
-                          className="py-0.5 text-center text-[10px] text-slate-500"
+                          className="py-0.5 text-center text-[10px] text-black"
                         >
                           {d}
                         </div>
@@ -380,7 +373,7 @@ export default function CommunityPage() {
                               ? lateCls
                               : status === "no-record"
                                 ? noRecordCls
-                                : "bg-transparent text-slate-400";
+                                : "bg-transparent text-black";
                         return (
                           <div
                             key={i}

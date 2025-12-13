@@ -139,15 +139,19 @@ export default function SchedulePage() {
 
   async function fetchAll() {
     setLoading(true);
+
+    // 1) 일정 한 번에 조회
     const { data: scheduleRows, error: sErr } = await supabase
       .from("schedules")
       .select("id,date,batch_id,created_by,closed,poll_title,created_at")
       .order("created_at", { ascending: false });
+
     if (sErr) {
       console.error(sErr);
       setLoading(false);
       return;
     }
+
     const mapped: LocalSchedule[] = (scheduleRows || []).map((r) => ({
       id: r.id,
       dateObj: new Date(r.date),
@@ -158,38 +162,59 @@ export default function SchedulePage() {
     }));
     setSchedulesRaw(mapped);
 
+    // 2) 해당 일정들의 투표 내역 + 사용자 프로필을 조인으로 한 번에 조회
     const scheduleIds = mapped.map((r) => r.id);
-    let voteRows: VoteRow[] = [];
     if (scheduleIds.length) {
       const { data: vData, error: vErr } = await supabase
         .from("schedule_votes")
-        .select("schedule_id,user_id")
+        .select(
+          `
+          schedule_id,
+          user_id,
+          user:user_id (
+            id,
+            name,
+            nickname,
+            email,
+            position
+          )
+        `,
+        )
         .in("schedule_id", scheduleIds);
-      if (!vErr && vData) voteRows = vData as VoteRow[];
-    }
-    setVotes(voteRows);
 
-    // 사용자 프로필 로드
-    const userIds = Array.from(new Set(voteRows.map((v) => v.user_id)));
-    if (userIds.length) {
-      const { data: uData } = await supabase
-        .from("users")
-        .select("id,name,nickname,email,position") // name 포함
-        .in("id", userIds);
-      const map: Record<string, UserProfile> = {};
-      (uData || []).forEach((u) => {
-        map[u.id] = {
-          id: u.id,
-          name: (u as any).name,
-          nickname: (u as any).nickname,
-          email: (u as any).email,
-          position: (u as any).position,
-        };
-      });
-      setUserProfiles(map);
+      if (vErr) {
+        console.error("votes load error:", vErr);
+        setVotes([]);
+        setUserProfiles({});
+      } else {
+        const voteRows: VoteRow[] = (vData || []).map((row: any) => ({
+          schedule_id: row.schedule_id,
+          user_id: row.user_id,
+        }));
+        setVotes(voteRows);
+
+        // userProfiles 맵 구성(중복 제거)
+        const map: Record<string, UserProfile> = {};
+        (vData || []).forEach((row: any) => {
+          const u = row.user;
+          if (!u) return;
+          if (!map[u.id]) {
+            map[u.id] = {
+              id: u.id,
+              name: u.name ?? null,
+              nickname: u.nickname ?? null,
+              email: u.email ?? null,
+              position: u.position ?? null,
+            };
+          }
+        });
+        setUserProfiles(map);
+      }
     } else {
+      setVotes([]);
       setUserProfiles({});
     }
+
     setLoading(false);
   }
 
@@ -251,13 +276,15 @@ export default function SchedulePage() {
     fetchAll();
   }
 
-  // 낙관적 업데이트
+  // 낙관적 업데이트(실패 시 최소 롤백, 전체 재조회 방지)
   async function toggleVote(scheduleId: string) {
     if (!sessionUserId) return;
     const already = votes.some(
       (v) => v.schedule_id === scheduleId && v.user_id === sessionUserId,
     );
+
     if (already) {
+      // 낙관적 제거
       setVotes((prev) =>
         prev.filter(
           (v) => !(v.schedule_id === scheduleId && v.user_id === sessionUserId),
@@ -268,11 +295,16 @@ export default function SchedulePage() {
         .delete()
         .eq("schedule_id", scheduleId)
         .eq("user_id", sessionUserId);
+
       if (error) {
-        // 실패 시 되돌리기
-        fetchAll();
+        // 실패 시 되돌림(부분 롤백만)
+        setVotes((prev) => [
+          ...prev,
+          { schedule_id: scheduleId, user_id: sessionUserId },
+        ]);
       }
     } else {
+      // 낙관적 추가
       setVotes((prev) => [
         ...prev,
         { schedule_id: scheduleId, user_id: sessionUserId },
@@ -280,8 +312,38 @@ export default function SchedulePage() {
       const { error } = await supabase
         .from("schedule_votes")
         .insert({ schedule_id: scheduleId, user_id: sessionUserId });
+
       if (error) {
-        fetchAll();
+        // 실패 시 제거(부분 롤백만)
+        setVotes((prev) =>
+          prev.filter(
+            (v) =>
+              !(v.schedule_id === scheduleId && v.user_id === sessionUserId),
+          ),
+        );
+      } else {
+        // 사용자 프로필 맵에 내 프로필이 없다면 한 번만 보강(추가 요청 방지 위해 세션의 사용자 정보로 채움)
+        const me = userProfiles[sessionUserId];
+        if (!me) {
+          // 세션에 name이 없다면 users 테이블에서 내 행만 조회(1회)
+          const { data: myRow } = await supabase
+            .from("users")
+            .select("id,name,nickname,email,position")
+            .eq("id", sessionUserId)
+            .maybeSingle();
+          if (myRow) {
+            setUserProfiles((prev) => ({
+              ...prev,
+              [sessionUserId]: {
+                id: myRow.id,
+                name: (myRow as any).name,
+                nickname: (myRow as any).nickname,
+                email: (myRow as any).email,
+                position: (myRow as any).position,
+              },
+            }));
+          }
+        }
       }
     }
   }
