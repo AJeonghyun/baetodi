@@ -351,13 +351,11 @@ export default function SchedulePage() {
   const userIsChairman = sessionUserPosition === "협회장"; // 종료/삭제 권한
 
   async function closePoll(batchId: string) {
-    // 권한 체크
     if (sessionUserPosition !== "협회장") {
       alert("협회장만 종료할 수 있습니다.");
       return;
     }
 
-    // 1) batch 내 후보 가져오기
     const { data: schedulesInBatch, error: sErr } = await supabase
       .from("schedules")
       .select("id,date")
@@ -368,7 +366,6 @@ export default function SchedulePage() {
     }
     const ids = schedulesInBatch.map((r) => r.id);
 
-    // 2) 각 후보의 투표 수 집계
     const { data: votesData, error: vErr } = await supabase
       .from("schedule_votes")
       .select("schedule_id, user_id")
@@ -384,7 +381,6 @@ export default function SchedulePage() {
       counts.set(v.schedule_id, (counts.get(v.schedule_id) || 0) + 1);
     });
 
-    // 3) 최다 득표 일정 선정(동률이면 가장 이른 날짜)
     const sortedByRule = schedulesInBatch.sort((a, b) => {
       const diff = (counts.get(b.id) || 0) - (counts.get(a.id) || 0);
       if (diff !== 0) return diff;
@@ -396,7 +392,7 @@ export default function SchedulePage() {
       return;
     }
 
-    // 4) 종료/확정 플래그 업데이트
+    // 1) 배치 전체 종료(closed = true)
     const { error: closeErr } = await supabase
       .from("schedules")
       .update({ closed: true })
@@ -406,6 +402,7 @@ export default function SchedulePage() {
       return;
     }
 
+    // 2) 승자/패자 플래그 설정
     const { error: markWinnerErr } = await supabase
       .from("schedules")
       .update({ is_event: true })
@@ -414,7 +411,6 @@ export default function SchedulePage() {
       console.error("winner mark error:", markWinnerErr);
       return;
     }
-
     const losers = ids.filter((id) => id !== winnerId);
     if (losers.length) {
       await supabase
@@ -423,7 +419,7 @@ export default function SchedulePage() {
         .in("id", losers);
     }
 
-    // 5) 자동 출석 처리: winnerId에 투표한 사용자들 출석 upsert(late=false, exempt=false)
+    // 3) 승자에 투표한 사용자 출석 upsert
     const winnerVoters = (votesData || []).filter(
       (v) => v.schedule_id === winnerId,
     );
@@ -434,22 +430,15 @@ export default function SchedulePage() {
         late: false,
         exempt: false,
       }));
-      // upsert: unique(schedule_id,user_id) 기준
-      const { error: attErr } = await supabase
-        .from("attendance")
-        .upsert(payload, {
-          onConflict: "schedule_id,user_id",
-          ignoreDuplicates: false,
-        });
-      if (attErr) console.error("attendance upsert error:", attErr);
+      await supabase.from("attendance").upsert(payload, {
+        onConflict: "schedule_id,user_id",
+        ignoreDuplicates: false,
+      });
     }
 
-    // 6) 로컬 상태 업데이트(낙관적)
+    // 로컬 상태 낙관적 갱신
     setSchedulesRaw((prev) =>
-      prev.map((s) => {
-        if (s.batch_id !== batchId) return s;
-        return { ...s, closed: true } as any;
-      }),
+      prev.map((s) => (s.batch_id === batchId ? { ...s, closed: true } : s)),
     );
   }
 
@@ -478,28 +467,39 @@ export default function SchedulePage() {
   // 종료된 투표 삭제(묶음)
   async function deletePoll(batchId: string) {
     if (!userIsChairman) return;
-    // 해당 배치의 schedule id 수집
-    const { data: scheds, error: sErr } = await supabase
-      .from("schedules")
-      .select("id, closed")
-      .eq("batch_id", batchId);
-    if (sErr || !scheds?.length) return;
 
-    // 종료된 투표만 삭제 허용
-    const allClosed = scheds.every((s: any) => !!s.closed);
-    if (!allClosed) {
+    // 서버에서 종료 여부 집계: closed != true 가 1개라도 있으면 진행 중으로 간주
+    const { data: notClosedCount, error: countErr } = await supabase
+      .from("schedules")
+      .select("id", { count: "exact", head: true })
+      .eq("batch_id", batchId)
+      .not("closed", "is", true); // closed IS NOT TRUE (null/false 모두 포함)
+
+    if (countErr) {
+      console.error("closed count error:", countErr);
+      return;
+    }
+    if (
+      (notClosedCount as any)?.length === 1 ||
+      (notClosedCount as any)?.count > 0
+    ) {
       alert("진행 중인 투표는 삭제할 수 없습니다.");
       return;
     }
 
+    // 삭제 대상 수집
+    const { data: scheds, error: sErr } = await supabase
+      .from("schedules")
+      .select("id")
+      .eq("batch_id", batchId);
+
+    if (sErr || !scheds?.length) return;
     const ids = scheds.map((s: any) => s.id);
 
     // 관련 투표/출석 삭제 후 스케줄 삭제
-    if (ids.length) {
-      await supabase.from("schedule_votes").delete().in("schedule_id", ids);
-      await supabase.from("attendance").delete().in("schedule_id", ids);
-      await supabase.from("schedules").delete().in("id", ids);
-    }
+    await supabase.from("schedule_votes").delete().in("schedule_id", ids);
+    await supabase.from("attendance").delete().in("schedule_id", ids);
+    await supabase.from("schedules").delete().in("id", ids);
 
     // 로컬 상태 갱신
     setSchedulesRaw((prev) => prev.filter((s) => s.batch_id !== batchId));
