@@ -709,7 +709,7 @@ export default function SchedulePage() {
       </main>
 
       <Dialog open={openNew} onOpenChange={setOpenNew}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
+        <DialogContent className="max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-y-auto p-3 sm:max-w-lg sm:p-6">
           <DialogHeader>
             <DialogTitle>새 날짜 투표 생성</DialogTitle>
             <DialogDescription className="text-xs">
@@ -728,7 +728,7 @@ export default function SchedulePage() {
               />
             </div>
 
-            {/* 캘린더 컨테이너: 모바일 넘침 방지 */}
+            {/* 캘린더 컨테이너: 모바일 넘침/잘림 방지 */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-700">
@@ -738,14 +738,17 @@ export default function SchedulePage() {
                   선택: {selectedDates.length}개
                 </span>
               </div>
+
               <div className="w-full max-w-full overflow-hidden rounded-md border p-2 sm:p-3">
-                <Calendar
-                  mode="multiple"
-                  selected={selectedDates}
-                  onSelect={(dates: any) => setSelectedDates(dates || [])}
-                  locale={ko}
-                  className="w-full max-w-full"
-                />
+                <div className="w-full max-w-full min-w-0">
+                  <Calendar
+                    mode="multiple"
+                    selected={selectedDates}
+                    onSelect={(dates: any) => setSelectedDates(dates || [])}
+                    locale={ko}
+                    className="w-full max-w-full min-w-0 [&_.rdp]:text-xs [&_.rdp-caption]:px-2 [&_.rdp-month]:px-0 [&_.rdp-table]:w-full"
+                  />
+                </div>
               </div>
 
               {/* 선택한 날짜 미리보기: 모바일 줄바꿈/스크롤 분리 */}
