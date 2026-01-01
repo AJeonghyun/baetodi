@@ -1,5 +1,6 @@
-import Link from "next/link";
 import "./global.css";
+import { SiteHeader } from "@/components/site-header";
+
 export const metadata = {
   title: "Baetodi",
 };
@@ -11,7 +12,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko">
-      <body>{children}</body>
+      <body>
+        <SiteHeader />
+        {children}
+      </body>
     </html>
   );
 }

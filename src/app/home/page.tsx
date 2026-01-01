@@ -1,290 +1,249 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link"; // 추가
-import { supabase } from "@/lib/supabase/client";
-
-// shadcn UI 컴포넌트 추가
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import {
   Card,
+  CardContent,
   CardHeader,
   CardTitle,
   CardDescription,
-  CardContent,
 } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+  Globe,
+  Bookmark,
+  MessagesSquare,
+  MonitorSmartphone,
+  Users,
+} from "lucide-react";
 
-type UserProfile = {
-  id: string;
-  name: string;
-  nickname: string | null;
-  position: string | null;
-  avatar_url: string | null; // 추가
-  email?: string;
+const historyItems = [
+  {
+    year: "2023",
+    title: "시작",
+    desc: "첫 모임과 함께 배토디 탄생",
+    Icon: Globe,
+  },
+  {
+    year: "2024",
+    title: "성장",
+    desc: "정기 모임·투표 시스템 도입",
+    Icon: Bookmark,
+  },
+  {
+    year: "2025",
+    title: "확장",
+    desc: "공지·일정·커뮤니티 온라인 통합",
+    Icon: MessagesSquare,
+  },
+  {
+    year: "2026",
+    title: "도약",
+    desc: "참여형 운영과 신규 코트 확보",
+    Icon: MonitorSmartphone,
+  },
+  {
+    year: "2027",
+    title: "함께",
+    desc: "회원 100+명, 더 넓은 네트워크",
+    Icon: Users,
+  },
+];
+
+const pixelAvatar = (fg: string, bg: string) => {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'><rect width='16' height='16' fill='${bg}'/><rect x='5' y='3' width='6' height='6' rx='1' fill='${fg}'/><rect x='4' y='7' width='8' height='6' rx='1' fill='${fg}'/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 };
 
 export default function HomePage() {
-  const router = useRouter();
-  const [checking, setChecking] = useState(true);
-  const [sessionUser, setSessionUser] = useState<{
-    id: string;
-    email: string | null;
-  } | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [kakaoImageUrl, setKakaoImageUrl] = useState<string | null>(null); // 카카오 프로필 이미지
-  const [openProfile, setOpenProfile] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [nicknameInput, setNicknameInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  // 로그인 체크 & 프로필 로드
-  useEffect(() => {
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!data.session) {
-        router.replace("/login");
-        return;
-      }
-      const user = data.session.user;
-      setSessionUser({ id: user.id, email: user.email ?? null });
-
-      // 카카오 프로필 이미지 후보 키들
-      const kakaoImg =
-        user.user_metadata?.profile_image ||
-        user.user_metadata?.profile_image_url ||
-        user.user_metadata?.picture ||
-        user.user_metadata?.avatar_url ||
-        null;
-      setKakaoImageUrl(kakaoImg);
-
-      const { data: row, error: selectErr } = await supabase
-        .from("users")
-        .select("id,name,nickname,position,avatar_url")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (selectErr) console.error(selectErr);
-
-      if (!row) {
-        const inferredName =
-          (user.user_metadata?.name ||
-            user.user_metadata?.full_name ||
-            user.user_metadata?.display_name ||
-            user.email?.split("@")[0]) ??
-          "회원";
-
-        const { error: insertErr } = await supabase.from("users").insert({
-          id: user.id,
-          name: inferredName,
-          nickname: null,
-          position: null,
-          avatar_url: kakaoImg, // 최초 저장
-        });
-        if (insertErr) console.error(insertErr);
-
-        setProfile({
-          id: user.id,
-          name: inferredName,
-          nickname: null,
-          position: null,
-          avatar_url: kakaoImg,
-          email: user.email ?? undefined,
-        });
-      } else {
-        // DB에 없고 카카오 이미지가 있으면 업데이트
-        if (!row.avatar_url && kakaoImg) {
-          const { error: updateAvatarErr } = await supabase
-            .from("users")
-            .update({ avatar_url: kakaoImg })
-            .eq("id", user.id);
-          if (updateAvatarErr) console.error(updateAvatarErr);
-          row.avatar_url = kakaoImg;
-        }
-
-        setProfile({
-          id: row.id,
-          name: row.name,
-          nickname: row.nickname,
-          position: row.position,
-          avatar_url: row.avatar_url,
-          email: user.email ?? undefined,
-        });
-        setNicknameInput(row.nickname ?? "");
-      }
-
-      setChecking(false);
-    });
-  }, [router]);
-
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    router.replace("/login");
-  }
-
-  // 닉네임만 수정 (화면 표시는 항상 name 사용)
-  async function handleSaveNickname() {
-    if (!sessionUser) return;
-    setSaving(true);
-    setError(null);
-
-    const nickname = nicknameInput.trim() || null;
-
-    const { data: updated, error: updateErr } = await supabase
-      .from("users")
-      .update({ nickname })
-      .eq("id", sessionUser.id)
-      .select("id,nickname")
-      .single();
-
-    if (updateErr) {
-      console.error(updateErr);
-      setError("저장 실패. 다시 시도하세요.");
-    } else {
-      setProfile((p) => (p ? { ...p, nickname: updated.nickname } : p));
-      setOpenProfile(false);
-    }
-    setSaving(false);
-  }
-
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-40" />
-          <Skeleton className="h-4 w-48" />
-          <Skeleton className="h-4 w-32" />
-        </div>
-      </div>
-    );
-  }
-
-  // 화면 표시용 이름은 항상 name
-  const displayName = profile?.name ?? "회원";
-  const positionDisplay = profile?.position ?? "미지정";
-  const avatarSrc =
-    profile?.avatar_url ||
-    kakaoImageUrl ||
-    (profile ? `/avatars/${profile.id}.png` : "");
-
   return (
     <div className="min-h-screen w-full bg-white text-[15px] text-slate-800 sm:text-base">
-      <header className="sticky top-0 w-full border-b border-slate-200 bg-white/80 backdrop-blur">
-        <div className="flex h-16 w-full items-center justify-between px-4 sm:px-6 lg:px-10">
-          <h1 className="text-2xl font-bold">배토디 블로그</h1>
-          <div className="flex items-center">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="focus-visible:ring-ring flex items-center gap-3 rounded-full px-2 py-1 focus:outline-none focus-visible:ring-0">
-                  <Avatar className="h-12 w-12">
-                    <AvatarImage src={avatarSrc} alt={profile?.name} />
-                    <AvatarFallback className="text-lg">
-                      {profile?.name?.slice(0, 1) ?? "유"}
-                    </AvatarFallback>
-                  </Avatar>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuLabel>계정</DropdownMenuLabel>
-                <DropdownMenuItem onClick={() => router.push("/mypage")}>
-                  마이페이지
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    setNicknameInput(profile?.nickname ?? "");
-                    setOpenProfile(true);
-                  }}
-                >
-                  프로필 설정
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={handleSignOut}
-                  className="text-red-600 focus:text-red-700"
-                >
-                  로그아웃
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+      <main className="w-full space-y-24 px-4 pt-20 pb-24 sm:px-6 lg:px-10">
+        <section className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
+          <div className="space-y-6">
+            <p className="text-sm font-semibold tracking-[0.12em] text-slate-500 uppercase">
+              배드민턴 동호회 · BAETODI
+            </p>
+            <h2 className="text-4xl leading-tight font-extrabold tracking-tight sm:text-5xl">
+              함께 치고, 함께 성장하는
+              <span className="ml-2 inline-block rounded-full bg-slate-900 px-3 py-1 text-white">
+                배토디
+              </span>
+            </h2>
+            <p className="max-w-2xl text-lg leading-relaxed text-slate-600 sm:text-xl">
+              일정, 투표, 공지, 커뮤니티는 상단 네비게이션에서 바로 이동하세요.
+              스크롤하며 인사말, 연혁, 회원 소개를 만나볼 수 있습니다.
+            </p>
           </div>
-        </div>
-      </header>
-
-      <section className="w-full px-4 py-16 sm:px-6 lg:px-10">
-        <div className="space-y-4 text-left">
-          <h2 className="text-5xl leading-tight font-extrabold tracking-tight">
-            배토디 — 배드민턴 토할때까지 디질때까지
-          </h2>
-          <p className="max-w-2xl text-lg leading-relaxed text-slate-600 sm:text-xl">
-            일정 관리, 참여 투표, 공지 확인을 한 곳에서.
-          </p>
-        </div>
-        <Separator className="my-10" />
-      </section>
-
-      <section className="grid w-full gap-6 px-4 pb-24 sm:px-6 md:grid-cols-3 lg:px-10">
-        <Link href="/notice" className="group block focus:outline-none">
-          <Card className="group-focus:ring-ring transition group-focus:ring-2 group-focus:ring-offset-2 hover:shadow-md">
-            <CardHeader>
-              <CardTitle className="text-lg">공지</CardTitle>
-              <CardDescription className="text-sm sm:text-base">
-                동호회 주요 안내 및 업데이트
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm text-slate-600 sm:text-base">
-              일정 및 운영 공지가 업로드되면 여기에서 확인 가능합니다.
+          <Card className="overflow-hidden border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-100">
+            <CardContent className="space-y-3 p-6 sm:p-8">
+              <p className="text-sm font-semibold text-slate-600">
+                오늘도 한 게임
+              </p>
+              <p className="text-2xl font-bold text-slate-900">
+                코트에서 땀 흘리고, 온라인에서 연결되는 배토디
+              </p>
+              <p className="text-sm text-slate-600">
+                상단 메뉴로 공지·일정·커뮤니티에 바로 접근하세요.
+              </p>
             </CardContent>
           </Card>
-        </Link>
-        <Link href="/schedule" className="group block focus:outline-none">
-          <Card className="group-focus:ring-ring transition group-focus:ring-2 group-focus:ring-offset-2 hover:shadow-md">
-            <CardHeader>
-              <CardTitle className="text-lg">일정 관리</CardTitle>
-              <CardDescription className="text-sm sm:text-base">
-                모임 참석 및 투표
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm text-slate-600 sm:text-base">
-              참석 여부, 날짜 투표, 코트 배정 등 기능을 확장할 수 있습니다.
-            </CardContent>
-          </Card>
-        </Link>
-        <Link href="/community" className="group block focus:outline-none">
-          <Card className="group-focus:ring-ring transition group-focus:ring-2 group-focus:ring-offset-2 hover:shadow-md">
-            <CardHeader>
-              <CardTitle className="text-lg">커뮤니티</CardTitle>
-              <CardDescription className="text-sm sm:text-base">
-                기록 및 교류
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="text-sm text-slate-600 sm:text-base">
-              출석, 경기 기록, 사진 공유 기능을 점진적으로 추가할 예정입니다.
-            </CardContent>
-          </Card>
-        </Link>
-      </section>
+        </section>
 
-      {/* Footer */}
+        <section id="greeting" className="space-y-6">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                Greeting
+              </p>
+              <h3 className="text-3xl font-bold text-slate-900 sm:text-4xl">
+                협회장 인사말
+              </h3>
+            </div>
+            <Link
+              href="/greeting"
+              className="text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              자세히 보기 →
+            </Link>
+          </div>
+          <Card className="overflow-hidden border-slate-200">
+            <div className="h-1 bg-gradient-to-r from-slate-900 via-slate-700 to-slate-500" />
+            <CardContent className="space-y-4 p-6 sm:p-8">
+              <p className="text-lg leading-relaxed text-slate-700 sm:text-xl">
+                배토디는 즐거운 배드민턴을 통해 건강과 유대를 키우는 모임입니다.
+                모두가 주인공이 되는 코트, 함께 땀 흘리고 웃으며 성장합시다.
+              </p>
+              <p className="text-sm text-slate-500">— 협회장 드림</p>
+            </CardContent>
+          </Card>
+        </section>
+
+        <section id="history" className="space-y-6">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                Timeline
+              </p>
+              <h3 className="text-3xl font-bold text-slate-900 sm:text-4xl">
+                배토디 출범 과정
+              </h3>
+            </div>
+            <Link
+              href="/history"
+              className="text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              자세히 보기 →
+            </Link>
+          </div>
+          <div className="relative w-full overflow-hidden rounded-xl border border-slate-200 bg-white p-6 sm:p-8">
+            <div className="absolute top-16 right-6 left-6 hidden h-px bg-slate-200 sm:block" />
+            <div className="relative grid gap-10 sm:grid-cols-5 sm:items-start">
+              {historyItems.map((item, idx) => {
+                const Icon = item.Icon;
+                return (
+                  <div
+                    key={item.year}
+                    className="flex flex-col items-start sm:items-center"
+                  >
+                    <div className="hidden flex-col items-center gap-3 sm:flex">
+                      <div className="flex items-center gap-3">
+                        <div className="size-3 rounded-full bg-slate-200" />
+                        <div className="grid place-items-center rounded-full bg-slate-900 p-3 text-white shadow-md">
+                          <Icon className="size-6" />
+                        </div>
+                        <div className="size-3 rounded-full bg-slate-200" />
+                      </div>
+                      <span className="text-sm font-semibold text-slate-900">
+                        {item.year}
+                      </span>
+                    </div>
+                    <div className="mt-4 flex w-full flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 shadow-sm sm:mt-6">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        <Icon className="size-4 text-slate-600 sm:hidden" />
+                        {item.year} · {item.title}
+                      </div>
+                      <p className="text-sm text-slate-600">{item.desc}</p>
+                    </div>
+                    {idx < historyItems.length - 1 && (
+                      <div className="mt-4 hidden h-[2px] w-full max-w-[160px] rounded-full bg-slate-200 sm:block" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        <section id="members" className="space-y-6">
+          <div className="flex items-baseline justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
+                Members
+              </p>
+              <h3 className="text-3xl font-bold text-slate-900 sm:text-4xl">
+                회원 소개
+              </h3>
+            </div>
+            <Link
+              href="/members"
+              className="text-sm font-medium text-slate-600 hover:text-slate-900"
+            >
+              자세히 보기 →
+            </Link>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              {
+                name: "홍길동",
+                role: "협회장",
+                note: "배드민턴 전략과 운영을 총괄합니다.",
+                avatar: pixelAvatar("#0f172a", "#e2e8f0"),
+              },
+              {
+                name: "김철수",
+                role: "코치",
+                note: "기술 클리닉과 연습 세션을 주도합니다.",
+                avatar: pixelAvatar("#0ea5e9", "#e0f2fe"),
+              },
+              {
+                name: "박영희",
+                role: "회원",
+                note: "즐겁게 참여하며 함께 성장합니다.",
+                avatar: pixelAvatar("#22c55e", "#dcfce7"),
+              },
+              {
+                name: "이민수",
+                role: "회원",
+                note: "신입 환영 담당, 첫 발을 돕습니다.",
+                avatar: pixelAvatar("#f97316", "#fff7ed"),
+              },
+            ].map((member) => (
+              <Card key={member.name} className="border-slate-200">
+                <CardHeader className="flex flex-row items-center gap-4">
+                  <div
+                    className="size-14 rounded-xl border border-slate-200"
+                    style={{
+                      backgroundImage: member.avatar,
+                      imageRendering: "pixelated",
+                    }}
+                    aria-hidden
+                  />
+                  <div>
+                    <CardTitle className="text-lg">{member.name}</CardTitle>
+                    <CardDescription className="text-sm font-medium text-slate-700">
+                      {member.role}
+                    </CardDescription>
+                  </div>
+                </CardHeader>
+                <CardContent className="text-sm text-slate-600">
+                  {member.note}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </section>
+      </main>
+
       <footer className="border-t border-slate-200 bg-white py-8">
         <div className="flex w-full justify-between px-4 text-sm text-slate-500 sm:px-6 lg:px-10">
           <p>© 2025 배토디</p>
@@ -301,63 +260,6 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
-
-      {/* 프로필 Dialog (shadcn) */}
-      <Dialog open={openProfile} onOpenChange={setOpenProfile}>
-        <DialogContent className="text-[15px] sm:max-w-md sm:text-base">
-          <DialogHeader>
-            <DialogTitle>프로필 설정</DialogTitle>
-            <DialogDescription>
-              이름은 고정, 닉네임만 수정 가능합니다.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <Label className="text-xs">이름</Label>
-              <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm">
-                {profile?.name}
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="nickname" className="text-xs">
-                닉네임
-              </Label>
-              <Input
-                id="nickname"
-                value={nicknameInput}
-                onChange={(e) => setNicknameInput(e.target.value)}
-                placeholder="닉네임 입력"
-              />
-              <p className="text-[11px] text-slate-500">
-                미입력 시 닉네임은 표시되지 않습니다.
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs">직책</Label>
-              <div className="rounded-md border bg-slate-50 px-3 py-2 text-sm">
-                {positionDisplay}
-              </div>
-              <p className="text-[11px] text-slate-500">
-                운영진이 지정한 역할(예: 운영진, 회원).
-              </p>
-            </div>
-
-            {error && <p className="text-xs text-red-600">{error}</p>}
-          </div>
-
-          <DialogFooter className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setOpenProfile(false)}>
-              닫기
-            </Button>
-            <Button onClick={handleSaveNickname} disabled={saving}>
-              {saving ? "저장 중..." : "저장"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

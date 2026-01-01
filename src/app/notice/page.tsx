@@ -140,28 +140,17 @@ export default function NoticePage() {
 
   return (
     <div className="min-h-screen w-full bg-white text-slate-800">
-      <header className="sticky top-0 w-full border-b border-slate-200 bg-white/80 backdrop-blur">
-        <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-10">
-          <h1 className="text-xl font-bold">공지</h1>
-          <div className="flex items-center gap-3">
-            <Button size="sm" onClick={() => setOpenNew(true)}>
-              공지 작성
-            </Button>
-            <Link
-              href="/home"
-              className="text-sm text-slate-600 hover:underline"
-            >
-              홈으로
-            </Link>
-          </div>
-        </div>
-      </header>
-
       <main className="w-full px-4 py-8 sm:px-6 lg:px-10">
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold">공지</h1>
+          <Button size="sm" onClick={() => setOpenNew(true)}>
+            공지 작성
+          </Button>
+        </div>
+        <Separator className="my-6" />
         <div className="space-y-2">
           <p className="text-slate-600">동호회 공지와 업데이트를 확인하세요.</p>
         </div>
-        <Separator className="my-6" />
 
         {loading && <p className="text-sm text-slate-500">불러오는 중...</p>}
 
