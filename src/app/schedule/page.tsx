@@ -709,7 +709,7 @@ export default function SchedulePage() {
       </main>
 
       <Dialog open={openNew} onOpenChange={setOpenNew}>
-        <DialogContent className="max-h-[90vh] max-w-[calc(100vw-2rem)] overflow-y-auto p-3 sm:max-w-lg sm:p-6">
+        <DialogContent className="max-h-[calc(100dvh-1.5rem)] max-w-[calc(100vw-2rem)] overflow-y-auto overscroll-contain p-3 sm:max-h-[90vh] sm:max-w-lg sm:p-6">
           <DialogHeader>
             <DialogTitle>새 날짜 투표 생성</DialogTitle>
             <DialogDescription className="text-xs">
@@ -740,13 +740,13 @@ export default function SchedulePage() {
               </div>
 
               <div className="w-full max-w-full overflow-hidden rounded-md border p-2 sm:p-3">
-                <div className="w-full max-w-full min-w-0">
+                <div className="max-h-[65vh] min-h-0 overflow-auto sm:max-h-none">
                   <Calendar
                     mode="multiple"
                     selected={selectedDates}
                     onSelect={(dates: any) => setSelectedDates(dates || [])}
                     locale={ko}
-                    className="w-full max-w-full min-w-0 [&_.rdp]:text-xs [&_.rdp-caption]:px-2 [&_.rdp-month]:px-0 [&_.rdp-table]:w-full"
+                    className="w-full max-w-full min-w-0 [&_.rdp]:text-xs [&_.rdp-caption]:px-2 [&_.rdp-month]:px-0 [&_.rdp-months]:w-full [&_.rdp-table]:w-full"
                   />
                 </div>
               </div>
