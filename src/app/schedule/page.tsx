@@ -740,7 +740,7 @@ export default function SchedulePage() {
               </div>
 
               <div className="w-full max-w-full overflow-hidden rounded-md border p-2 sm:p-3">
-                <div className="max-h-[65vh] min-h-0 overflow-auto sm:max-h-none">
+                <div className="w-full min-h-[360px] sm:min-h-[400px]">
                   <Calendar
                     mode="multiple"
                     selected={selectedDates}
