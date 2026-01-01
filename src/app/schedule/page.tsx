@@ -709,7 +709,7 @@ export default function SchedulePage() {
       </main>
 
       <Dialog open={openNew} onOpenChange={setOpenNew}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="max-h-[90vh] overflow-y-auto p-4 sm:max-w-lg sm:p-6">
           <DialogHeader>
             <DialogTitle>새 날짜 투표 생성</DialogTitle>
             <DialogDescription className="text-xs">
@@ -727,6 +727,8 @@ export default function SchedulePage() {
                 onChange={(e) => setPollTitle(e.target.value)}
               />
             </div>
+
+            {/* 캘린더 컨테이너: 모바일 넘침 방지 */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-700">
@@ -736,17 +738,19 @@ export default function SchedulePage() {
                   선택: {selectedDates.length}개
                 </span>
               </div>
-              <div className="rounded-md border p-2">
+              <div className="w-full max-w-full overflow-hidden rounded-md border p-2 sm:p-3">
                 <Calendar
                   mode="multiple"
                   selected={selectedDates}
                   onSelect={(dates: any) => setSelectedDates(dates || [])}
                   locale={ko}
-                  className="w-full"
+                  className="w-full max-w-full"
                 />
               </div>
+
+              {/* 선택한 날짜 미리보기: 모바일 줄바꿈/스크롤 분리 */}
               {selectedDates.length > 0 && (
-                <div className="text-xs text-slate-600">
+                <div className="max-h-24 overflow-y-auto text-xs break-words whitespace-normal text-slate-600">
                   {selectedDates
                     .sort((a, b) => a.getTime() - b.getTime())
                     .map((d) => format(d, "yyyy-MM-dd", { locale: ko }))
