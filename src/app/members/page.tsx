@@ -13,25 +13,55 @@ const pixelAvatar = (fg: string, bg: string) => {
 
 const members = [
   {
-    name: "홍길동",
+    name: "안정현",
     role: "협회장",
     note: "배드민턴 전략과 운영을 총괄합니다.",
     avatar: pixelAvatar("#0f172a", "#e2e8f0"),
   },
   {
-    name: "김철수",
+    name: "김기영",
     role: "코치",
     note: "기술 클리닉과 연습 세션을 주도합니다.",
     avatar: pixelAvatar("#0ea5e9", "#e0f2fe"),
   },
   {
-    name: "박영희",
+    name: "이수아",
     role: "회원",
     note: "즐겁게 참여하며 함께 성장합니다.",
     avatar: pixelAvatar("#22c55e", "#dcfce7"),
   },
   {
-    name: "이민수",
+    name: "이민우",
+    role: "회원",
+    note: "신입 환영 담당, 첫 발을 돕습니다.",
+    avatar: pixelAvatar("#f97316", "#fff7ed"),
+  },
+  {
+    name: "차승준",
+    role: "회원",
+    note: "신입 환영 담당, 첫 발을 돕습니다.",
+    avatar: pixelAvatar("#f97316", "#fff7ed"),
+  },
+  {
+    name: "이지윤",
+    role: "회원",
+    note: "신입 환영 담당, 첫 발을 돕습니다.",
+    avatar: pixelAvatar("#f97316", "#fff7ed"),
+  },
+  {
+    name: "김승혁",
+    role: "회원",
+    note: "신입 환영 담당, 첫 발을 돕습니다.",
+    avatar: pixelAvatar("#f97316", "#fff7ed"),
+  },
+  {
+    name: "황현민",
+    role: "회원",
+    note: "신입 환영 담당, 첫 발을 돕습니다.",
+    avatar: pixelAvatar("#f97316", "#fff7ed"),
+  },
+  {
+    name: "김성훈",
     role: "회원",
     note: "신입 환영 담당, 첫 발을 돕습니다.",
     avatar: pixelAvatar("#f97316", "#fff7ed"),
@@ -41,12 +71,12 @@ const members = [
 export default function MembersPage() {
   return (
     <div className="min-h-screen bg-white text-slate-800">
-      <main className="mx-auto flex w-full max-w-5xl flex-col gap-12 px-4 pb-20 pt-20 sm:px-6 lg:px-10">
+      <main className="mx-auto flex w-full max-w-5xl flex-col gap-12 px-4 pt-20 pb-20 sm:px-6 lg:px-10">
         <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+          <p className="text-xs font-semibold tracking-[0.12em] text-slate-500 uppercase">
             Members
           </p>
-          <h1 className="text-3xl font-bold leading-tight sm:text-4xl">
+          <h1 className="text-3xl leading-tight font-bold sm:text-4xl">
             회원 소개
           </h1>
           <p className="text-slate-600">
