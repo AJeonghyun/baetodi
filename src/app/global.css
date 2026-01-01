@@ -119,7 +119,7 @@
     @apply border-border;
   }
   html {
-    font-size: 20px; /* 기본 폰트 slightly up */
+    font-size: 16px; /* 기본 폰트 slightly up */
   }
   body {
     @apply bg-background text-foreground antialiased;
